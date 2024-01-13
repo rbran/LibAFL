@@ -458,15 +458,13 @@ impl Drop for GuestMaps {
     }
 }
 
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct FatPtr(pub *const c_void, pub *const c_void);
+type GdbFn = dyn FnMut(&Emulator, &str) -> bool;
+static mut GDB_COMMANDS: Vec<Box<GdbFn>> = vec![];
 
-static mut GDB_COMMANDS: Vec<FatPtr> = vec![];
-
-extern "C" fn gdb_cmd(data: *const (), buf: *const u8, len: usize) -> i32 {
+extern "C" fn gdb_cmd(idx: *const (), buf: *const u8, len: usize) -> i32 {
+    let idx = idx as usize;
     unsafe {
-        let closure = &mut *(data as *mut Box<dyn for<'r> FnMut(&Emulator, &'r str) -> bool>);
+        let closure = &mut GDB_COMMANDS[idx];
         let cmd = std::str::from_utf8_unchecked(std::slice::from_raw_parts(buf, len));
         let emu = Emulator::new_empty();
         i32::from(closure(&emu, cmd))
@@ -828,6 +826,12 @@ impl<T> From<*mut T> for HookData {
 
 impl<T> From<*const T> for HookData {
     fn from(value: *const T) -> Self {
+        HookData(value as u64)
+    }
+}
+
+impl From<usize> for HookData {
+    fn from(value: usize) -> Self {
         HookData(value as u64)
     }
 }
@@ -1368,14 +1372,11 @@ impl Emulator {
     pub fn add_edge_hooks<T: Into<HookData>>(
         &self,
         data: T,
-        gen: Option<extern "C" fn(T, GuestAddr, GuestAddr) -> u64>,
-        exec: Option<extern "C" fn(T, u64)>,
+        gen: Option<extern "C" fn(u64, GuestAddr, GuestAddr) -> u64>,
+        exec: Option<extern "C" fn(u64, u64)>,
     ) -> HookId {
         unsafe {
             let data: u64 = data.into().0;
-            let gen: Option<extern "C" fn(u64, GuestAddr, GuestAddr) -> u64> =
-                core::mem::transmute(gen);
-            let exec: Option<extern "C" fn(u64, u64)> = core::mem::transmute(exec);
             let num = libafl_qemu_sys::libafl_add_edge_hook(gen, exec, data);
             HookId {
                 hook_type: HookType::Edge,
@@ -1387,16 +1388,12 @@ impl Emulator {
     pub fn add_block_hooks<T: Into<HookData>>(
         &self,
         data: T,
-        gen: Option<extern "C" fn(T, GuestAddr) -> u64>,
-        post_gen: Option<extern "C" fn(T, GuestAddr, GuestUsize)>,
-        exec: Option<extern "C" fn(T, u64)>,
+        gen: Option<extern "C" fn(u64, GuestAddr) -> u64>,
+        post_gen: Option<extern "C" fn(u64, GuestAddr, GuestUsize)>,
+        exec: Option<extern "C" fn(u64, u64)>,
     ) -> HookId {
         unsafe {
             let data: u64 = data.into().0;
-            let gen: Option<extern "C" fn(u64, GuestAddr) -> u64> = core::mem::transmute(gen);
-            let post_gen: Option<extern "C" fn(u64, GuestAddr, GuestUsize)> =
-                core::mem::transmute(post_gen);
-            let exec: Option<extern "C" fn(u64, u64)> = core::mem::transmute(exec);
             let num = libafl_qemu_sys::libafl_add_block_hook(gen, post_gen, exec, data);
             HookId {
                 hook_type: HookType::Block,
@@ -1408,23 +1405,17 @@ impl Emulator {
     pub fn add_read_hooks<T: Into<HookData>>(
         &self,
         data: T,
-        gen: Option<extern "C" fn(T, GuestAddr, MemAccessInfo) -> u64>,
-        exec1: Option<extern "C" fn(T, u64, GuestAddr)>,
-        exec2: Option<extern "C" fn(T, u64, GuestAddr)>,
-        exec4: Option<extern "C" fn(T, u64, GuestAddr)>,
-        exec8: Option<extern "C" fn(T, u64, GuestAddr)>,
-        exec_n: Option<extern "C" fn(T, u64, GuestAddr, usize)>,
+        gen: Option<extern "C" fn(u64, GuestAddr, MemAccessInfo) -> u64>,
+        exec1: Option<extern "C" fn(u64, u64, GuestAddr)>,
+        exec2: Option<extern "C" fn(u64, u64, GuestAddr)>,
+        exec4: Option<extern "C" fn(u64, u64, GuestAddr)>,
+        exec8: Option<extern "C" fn(u64, u64, GuestAddr)>,
+        exec_n: Option<extern "C" fn(u64, u64, GuestAddr, usize)>,
     ) -> HookId {
         unsafe {
             let data: u64 = data.into().0;
             let gen: Option<extern "C" fn(u64, GuestAddr, libafl_qemu_sys::MemOpIdx) -> u64> =
                 core::mem::transmute(gen);
-            let exec1: Option<extern "C" fn(u64, u64, GuestAddr)> = core::mem::transmute(exec1);
-            let exec2: Option<extern "C" fn(u64, u64, GuestAddr)> = core::mem::transmute(exec2);
-            let exec4: Option<extern "C" fn(u64, u64, GuestAddr)> = core::mem::transmute(exec4);
-            let exec8: Option<extern "C" fn(u64, u64, GuestAddr)> = core::mem::transmute(exec8);
-            let exec_n: Option<extern "C" fn(u64, u64, GuestAddr, usize)> =
-                core::mem::transmute(exec_n);
             let num = libafl_qemu_sys::libafl_add_read_hook(
                 gen, exec1, exec2, exec4, exec8, exec_n, data,
             );
@@ -1439,23 +1430,17 @@ impl Emulator {
     pub fn add_write_hooks<T: Into<HookData>>(
         &self,
         data: T,
-        gen: Option<extern "C" fn(T, GuestAddr, MemAccessInfo) -> u64>,
-        exec1: Option<extern "C" fn(T, u64, GuestAddr)>,
-        exec2: Option<extern "C" fn(T, u64, GuestAddr)>,
-        exec4: Option<extern "C" fn(T, u64, GuestAddr)>,
-        exec8: Option<extern "C" fn(T, u64, GuestAddr)>,
-        exec_n: Option<extern "C" fn(T, u64, GuestAddr, usize)>,
+        gen: Option<extern "C" fn(u64, GuestAddr, MemAccessInfo) -> u64>,
+        exec1: Option<extern "C" fn(u64, u64, GuestAddr)>,
+        exec2: Option<extern "C" fn(u64, u64, GuestAddr)>,
+        exec4: Option<extern "C" fn(u64, u64, GuestAddr)>,
+        exec8: Option<extern "C" fn(u64, u64, GuestAddr)>,
+        exec_n: Option<extern "C" fn(u64, u64, GuestAddr, usize)>,
     ) -> HookId {
         unsafe {
             let data: u64 = data.into().0;
             let gen: Option<extern "C" fn(u64, GuestAddr, libafl_qemu_sys::MemOpIdx) -> u64> =
                 core::mem::transmute(gen);
-            let exec1: Option<extern "C" fn(u64, u64, GuestAddr)> = core::mem::transmute(exec1);
-            let exec2: Option<extern "C" fn(u64, u64, GuestAddr)> = core::mem::transmute(exec2);
-            let exec4: Option<extern "C" fn(u64, u64, GuestAddr)> = core::mem::transmute(exec4);
-            let exec8: Option<extern "C" fn(u64, u64, GuestAddr)> = core::mem::transmute(exec8);
-            let exec_n: Option<extern "C" fn(u64, u64, GuestAddr, usize)> =
-                core::mem::transmute(exec_n);
             let num = libafl_qemu_sys::libafl_add_write_hook(
                 gen, exec1, exec2, exec4, exec8, exec_n, data,
             );
@@ -1469,20 +1454,14 @@ impl Emulator {
     pub fn add_cmp_hooks<T: Into<HookData>>(
         &self,
         data: T,
-        gen: Option<extern "C" fn(T, GuestAddr, usize) -> u64>,
-        exec1: Option<extern "C" fn(T, u64, u8, u8)>,
-        exec2: Option<extern "C" fn(T, u64, u16, u16)>,
-        exec4: Option<extern "C" fn(T, u64, u32, u32)>,
-        exec8: Option<extern "C" fn(T, u64, u64, u64)>,
+        gen: Option<extern "C" fn(u64, GuestAddr, usize) -> u64>,
+        exec1: Option<extern "C" fn(u64, u64, u8, u8)>,
+        exec2: Option<extern "C" fn(u64, u64, u16, u16)>,
+        exec4: Option<extern "C" fn(u64, u64, u32, u32)>,
+        exec8: Option<extern "C" fn(u64, u64, u64, u64)>,
     ) -> HookId {
         unsafe {
             let data: u64 = data.into().0;
-            let gen: Option<extern "C" fn(u64, GuestAddr, usize) -> u64> =
-                core::mem::transmute(gen);
-            let exec1: Option<extern "C" fn(u64, u64, u8, u8)> = core::mem::transmute(exec1);
-            let exec2: Option<extern "C" fn(u64, u64, u16, u16)> = core::mem::transmute(exec2);
-            let exec4: Option<extern "C" fn(u64, u64, u32, u32)> = core::mem::transmute(exec4);
-            let exec8: Option<extern "C" fn(u64, u64, u64, u64)> = core::mem::transmute(exec8);
             let num = libafl_qemu_sys::libafl_add_cmp_hook(gen, exec1, exec2, exec4, exec8, data);
             HookId {
                 hook_type: HookType::Cmp,
@@ -1680,11 +1659,8 @@ impl Emulator {
     #[allow(clippy::type_complexity)]
     pub fn add_gdb_cmd(&self, callback: Box<dyn FnMut(&Self, &str) -> bool>) {
         unsafe {
-            GDB_COMMANDS.push(core::mem::transmute(callback));
-            libafl_qemu_add_gdb_cmd(
-                gdb_cmd,
-                GDB_COMMANDS.last().unwrap() as *const _ as *const (),
-            );
+            libafl_qemu_add_gdb_cmd(gdb_cmd, GDB_COMMANDS.len() as *const ());
+            GDB_COMMANDS.push(callback);
         }
     }
 
