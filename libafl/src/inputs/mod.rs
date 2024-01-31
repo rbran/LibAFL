@@ -130,9 +130,9 @@ pub trait HasTargetBytes {
 /// Contains an internal bytes Vector
 pub trait HasBytesVec {
     /// The internal bytes map
-    fn bytes(&self) -> &[u8];
+    fn bytes(&self, idx: u64) -> &[u8];
     /// The internal bytes map (as mutable borrow)
-    fn bytes_mut(&mut self) -> &mut Vec<u8>;
+    fn bytes_mut(&mut self, idx: u64) -> &mut Vec<u8>;
 }
 
 /// Defines the input type shared across traits of the type.

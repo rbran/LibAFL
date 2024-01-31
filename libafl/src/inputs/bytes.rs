@@ -50,7 +50,7 @@ impl Input for BytesInput {
     /// Generate a name for this input
     fn generate_name(&self, _idx: usize) -> String {
         let mut hasher = RandomState::with_seeds(0, 0, 0, 0).build_hasher();
-        hasher.write(self.bytes());
+        hasher.write(self.bytes(0));
         format!("{:016x}", hasher.finish())
     }
 }
@@ -64,12 +64,12 @@ impl From<BytesInput> for Rc<RefCell<BytesInput>> {
 
 impl HasBytesVec for BytesInput {
     #[inline]
-    fn bytes(&self) -> &[u8] {
+    fn bytes(&self, _idx: u64) -> &[u8] {
         &self.bytes
     }
 
     #[inline]
-    fn bytes_mut(&mut self) -> &mut Vec<u8> {
+    fn bytes_mut(&mut self, _idx: u64) -> &mut Vec<u8> {
         &mut self.bytes
     }
 }

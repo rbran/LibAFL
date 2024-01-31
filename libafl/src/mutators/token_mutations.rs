@@ -312,6 +312,7 @@ where
         input: &mut I,
         _stage_idx: i32,
     ) -> Result<MutationResult, Error> {
+        let input_idx = state.rand_mut().next();
         let max_size = state.max_size();
         let tokens_len = {
             let meta = state.metadata_map().get::<Tokens>();
@@ -325,7 +326,7 @@ where
         };
         let token_idx = state.rand_mut().below(tokens_len as u64) as usize;
 
-        let size = input.bytes().len();
+        let size = input.bytes(input_idx).len();
         let off = state.rand_mut().below((size + 1) as u64) as usize;
 
         let meta = state.metadata_map().get::<Tokens>().unwrap();
@@ -340,10 +341,10 @@ where
             }
         }
 
-        input.bytes_mut().resize(size + len, 0);
+        input.bytes_mut(input_idx).resize(size + len, 0);
         unsafe {
-            buffer_self_copy(input.bytes_mut(), off, off + len, size - off);
-            buffer_copy(input.bytes_mut(), token, 0, off, len);
+            buffer_self_copy(input.bytes_mut(input_idx), off, off + len, size - off);
+            buffer_copy(input.bytes_mut(input_idx), token, 0, off, len);
         }
 
         Ok(MutationResult::Mutated)
@@ -380,7 +381,8 @@ where
         input: &mut I,
         _stage_idx: i32,
     ) -> Result<MutationResult, Error> {
-        let size = input.bytes().len();
+        let input_idx = state.rand_mut().next();
+        let size = input.bytes(input_idx).len();
         if size == 0 {
             return Ok(MutationResult::Skipped);
         }
@@ -407,7 +409,7 @@ where
         }
 
         unsafe {
-            buffer_copy(input.bytes_mut(), token, 0, off, len);
+            buffer_copy(input.bytes_mut(input_idx), token, 0, off, len);
         }
 
         Ok(MutationResult::Mutated)
@@ -445,7 +447,8 @@ where
         input: &mut I,
         _stage_idx: i32,
     ) -> Result<MutationResult, Error> {
-        let size = input.bytes().len();
+        let input_idx = state.rand_mut().next();
+        let size = input.bytes(input_idx).len();
         if size == 0 {
             return Ok(MutationResult::Skipped);
         }
@@ -463,8 +466,8 @@ where
         let idx = state.rand_mut().below(cmps_len as u64) as usize;
 
         let off = state.rand_mut().below(size as u64) as usize;
-        let len = input.bytes().len();
-        let bytes = input.bytes_mut();
+        let len = input.bytes(input_idx).len();
+        let bytes = input.bytes_mut(input_idx);
 
         let meta = state.metadata_map().get::<CmpValuesMetadata>().unwrap();
         let cmp_values = &meta.list[idx];
@@ -575,9 +578,9 @@ where
                 'outer: for i in off..len {
                     let mut size = core::cmp::min(v.0.len(), len - i);
                     while size != 0 {
-                        if v.0[0..size] == input.bytes()[i..i + size] {
+                        if v.0[0..size] == input.bytes(input_idx)[i..i + size] {
                             unsafe {
-                                buffer_copy(input.bytes_mut(), &v.1, 0, i, size);
+                                buffer_copy(input.bytes_mut(input_idx), &v.1, 0, i, size);
                             }
                             result = MutationResult::Mutated;
                             break 'outer;
@@ -586,9 +589,9 @@ where
                     }
                     size = core::cmp::min(v.1.len(), len - i);
                     while size != 0 {
-                        if v.1[0..size] == input.bytes()[i..i + size] {
+                        if v.1[0..size] == input.bytes(input_idx)[i..i + size] {
                             unsafe {
-                                buffer_copy(input.bytes_mut(), &v.0, 0, i, size);
+                                buffer_copy(input.bytes_mut(input_idx), &v.0, 0, i, size);
                             }
                             result = MutationResult::Mutated;
                             break 'outer;
@@ -1111,7 +1114,8 @@ where
     ) -> Result<Vec<I>, Error> {
         // TODO
         // handle 128-bits logs
-        let size = input.bytes().len();
+        let input_idx = state.rand_mut().next();
+        let size = input.bytes(input_idx).len();
         if size == 0 {
             return Ok(vec![]);
         }
@@ -1135,9 +1139,9 @@ where
         let orig_cmpvals = cmp_meta.orig_cmpvals();
         let new_cmpvals = cmp_meta.new_cmpvals();
         let headers = cmp_meta.headers();
-        let input_len = input.bytes().len();
+        let input_len = input.bytes(input_idx).len();
         let new_bytes = taint_meta.input_vec();
-        let orig_bytes = input.bytes();
+        let orig_bytes = input.bytes(input_idx);
 
         let taint = taint_meta.ranges();
         let mut ret = max_count.map_or_else(Vec::new, Vec::with_capacity);

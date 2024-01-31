@@ -158,6 +158,7 @@ where
             ));
         };
 
+        let input_idx = state.rand_mut().next();
         let mut input = state.corpus().cloned_input_for_id(corpus_idx)?;
         // The backup of the input
         let backup = input.clone();
@@ -172,7 +173,7 @@ where
         // Idea: No need to do this every time
         let orig_hash =
             Self::get_raw_map_hash_run(fuzzer, executor, state, manager, consumed_input, name)?;
-        let changed_bytes = changed.bytes_mut();
+        let changed_bytes = changed.bytes_mut(input_idx);
         let input_len = changed_bytes.len();
 
         // Binary heap, pop is logN, insert is logN
@@ -201,8 +202,8 @@ where
                 let copy_len = r.len();
                 unsafe {
                     buffer_copy(
-                        input.bytes_mut(),
-                        changed.bytes(),
+                        input.bytes_mut(input_idx),
+                        changed.bytes(input_idx),
                         range_start,
                         range_start,
                         copy_len,
@@ -230,8 +231,8 @@ where
                     // Revert the changes
                     unsafe {
                         buffer_copy(
-                            input.bytes_mut(),
-                            backup.bytes(),
+                            input.bytes_mut(input_idx),
+                            backup.bytes(input_idx),
                             range_start,
                             range_start,
                             copy_len,
@@ -274,11 +275,11 @@ where
         }
 
         if let Some(meta) = state.metadata_map_mut().get_mut::<TaintMetadata>() {
-            meta.update(input.bytes().to_vec(), res);
+            meta.update(input.bytes(input_idx).to_vec(), res);
 
             // println!("meta: {:#?}", meta);
         } else {
-            let meta = TaintMetadata::new(input.bytes().to_vec(), res);
+            let meta = TaintMetadata::new(input.bytes(input_idx).to_vec(), res);
             state.add_metadata::<TaintMetadata>(meta);
         }
 

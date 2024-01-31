@@ -6,7 +6,7 @@ use alloc::{
 };
 use core::{fmt::Debug, marker::PhantomData};
 
-use libafl_bolts::AsSlice;
+use libafl_bolts::{rands::Rand, AsSlice};
 
 use crate::{
     corpus::{Corpus, HasCurrentCorpusIdx},
@@ -15,6 +15,7 @@ use crate::{
     inputs::{BytesInput, GeneralizedInputMetadata, GeneralizedItem, HasBytesVec, UsesInput},
     mark_feature_time,
     observers::{MapObserver, ObserversTuple},
+    prelude::HasRand,
     stages::Stage,
     start_timer,
     state::{HasCorpus, HasExecutions, HasMetadata, UsesState},
@@ -60,7 +61,7 @@ where
     O: MapObserver,
     E: Executor<EM, Z> + HasObservers,
     E::Observers: ObserversTuple<E::State>,
-    E::State: UsesInput<Input = BytesInput> + HasExecutions + HasMetadata + HasCorpus,
+    E::State: UsesInput<Input = BytesInput> + HasExecutions + HasMetadata + HasCorpus + HasRand,
     EM: UsesState<State = E::State>,
     Z: UsesState<State = E::State>,
 {
@@ -75,6 +76,7 @@ where
         state: &mut E::State,
         manager: &mut EM,
     ) -> Result<(), Error> {
+        let input_idx = state.rand_mut().next();
         let Some(corpus_idx) = state.current_corpus_idx()? else {
             return Err(Error::illegal_state(
                 "state is not currently processing a corpus index",
@@ -96,7 +98,7 @@ where
             let mut entry = state.corpus().get(corpus_idx)?.borrow_mut();
             let input = entry.input_mut().as_mut().unwrap();
 
-            let payload: Vec<_> = input.bytes().iter().map(|&x| Some(x)).collect();
+            let payload: Vec<_> = input.bytes(input_idx).iter().map(|&x| Some(x)).collect();
             let original = input.clone();
             let meta = entry.metadata_map().get::<MapNoveltiesMetadata>().ok_or_else(|| {
                     Error::key_not_found(format!(
@@ -319,7 +321,7 @@ where
     EM: UsesState,
     O: MapObserver,
     OT: ObserversTuple<EM::State>,
-    EM::State: UsesInput<Input = BytesInput> + HasExecutions + HasMetadata + HasCorpus,
+    EM::State: UsesInput<Input = BytesInput> + HasExecutions + HasMetadata + HasCorpus + HasRand,
 {
     /// Create a new [`GeneralizationStage`].
     #[must_use]
@@ -405,11 +407,12 @@ where
                 end = payload.len();
             }
             let mut candidate = BytesInput::new(vec![]);
+            let input_idx = state.rand_mut().next();
             candidate
-                .bytes_mut()
+                .bytes_mut(input_idx)
                 .extend(payload[..start].iter().flatten());
             candidate
-                .bytes_mut()
+                .bytes_mut(input_idx)
                 .extend(payload[end..].iter().flatten());
 
             if self.verify_input(fuzzer, executor, state, manager, novelties, &candidate)? {
@@ -458,11 +461,12 @@ where
                 if payload[end] == Some(closing_char) {
                     endings += 1;
                     let mut candidate = BytesInput::new(vec![]);
+                    let input_idx = state.rand_mut().next();
                     candidate
-                        .bytes_mut()
+                        .bytes_mut(input_idx)
                         .extend(payload[..start].iter().flatten());
                     candidate
-                        .bytes_mut()
+                        .bytes_mut(input_idx)
                         .extend(payload[end..].iter().flatten());
 
                     if self.verify_input(fuzzer, executor, state, manager, novelties, &candidate)? {
